@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>報廢及類變紀錄系統（網頁版）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: sans-serif; margin: 10px; }
+    input[type="text"] { width: 100%; padding: 10px; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; white-space: nowrap; }
+    th { background: #f2f2f2; }
+    .hidden { display: none; }
+    button { padding: 10px 15px; margin: 5px; }
+    #summary { overflow-x: auto; margin-top: 20px; }
+  </style>
+</head>
+<body>
+
+<h2>報廢及類變紀錄系統（網頁版）（手機版優化）</h2>
+
+<input type="text" id="searchInput" placeholder="請輸入品號或品名">
+<div id="productTable" class="hidden"></div>
+
+<div>
+  <button onclick="batchInput()">批次輸入數量</button>
+  <button onclick="clearSummary()">清除紀錄</button>
+  <button onclick="capture()">截圖紀錄表格</button>
+</div>
+
+<div id="summary"></div>
+
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<script>
+let products = [];
+let selected = {};
+
+document.getElementById('searchInput').addEventListener('input', async function() {
+  const keyword = this.value.trim();
+  if (!keyword) {
+    document.getElementById('productTable').classList.add('hidden');
+    return;
+  }
+  const res = await fetch('/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyword })
+  });
+  products = await res.json();
+  renderProductTable();
+});
+
+function renderProductTable() {
+  const tableDiv = document.getElementById('productTable');
+  if (products.length === 0) {
+    tableDiv.innerHTML = '找不到商品';
+    tableDiv.classList.remove('hidden');
+    return;
+  }
+  let html = '<table><thead><tr><th>✔</th><th>品號</th><th>品名</th></tr></thead><tbody>';
+  products.forEach((p, idx) => {
+    html += `<tr>
+      <td><input type="checkbox" data-index="${idx}"></td>
+      <td>${p['品號']}</td>
+      <td>${p['品名']}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  tableDiv.innerHTML = html;
+  tableDiv.classList.remove('hidden');
+}
+
+async function batchInput() {
+  const checked = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'));
+  if (checked.length === 0) {
+    alert('請先勾選商品');
+    return;
+  }
+  let useSame = confirm('要使用統一數量嗎？');
+  let batchData = [];
+
+  if (useSame) {
+    const qty = prompt('請輸入數量：');
+    if (!qty || isNaN(qty) || qty <= 0) return;
+    checked.forEach(c => {
+      const p = products[c.dataset.index];
+      batchData.push({ ...p, 數量: parseInt(qty) });
+    });
+  } else {
+    for (const c of checked) {
+      const p = products[c.dataset.index];
+      const qty = prompt(`請輸入「${p['品名']}」的數量：`);
+      if (!qty || isNaN(qty) || qty <= 0) continue;
+      batchData.push({ ...p, 數量: parseInt(qty) });
+    }
+  }
+
+  await fetch('/record', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(batchData)
+  });
+  updateSummary();
+  document.getElementById('searchInput').value = '';
+  document.getElementById('productTable').classList.add('hidden');
+}
+
+async function updateSummary() {
+  const res = await fetch('/summary');
+  const data = await res.json();
+  let html = '<table><thead><tr><th>品號</th><th>品名</th><th>數量</th><th>記錄時間</th></tr></thead><tbody>';
+  data.forEach(d => {
+    html += `<tr><td>${d['品號']}</td><td>${d['品名']}</td><td>${d['數量']}</td><td>${d['記錄時間']}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('summary').innerHTML = html;
+}
+
+async function clearSummary() {
+  if (confirm('確定要清除所有紀錄？')) {
+    await fetch('/clear', { method: 'POST' });
+    updateSummary();
+  }
+}
+
+function capture() {
+  const target = document.getElementById('summary');
+  html2canvas(target).then(canvas => {
+    const link = document.createElement('a');
+    link.download = `報廢及類變紀錄_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.jpg`;
+    link.href = canvas.toDataURL('image/jpeg');
+    link.click();
+  });
+}
+
+updateSummary();
+</script>
+
+</body>
+</html>
